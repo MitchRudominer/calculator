@@ -3,10 +3,7 @@ package scanner
 import (
 	"fmt"
 	"math/big"
-	"regexp"
 )
-
-var lexRegExp = regexp.MustCompile(`^([ \(, \), \+, \-, \*, \^, 0-9, [[:space:]] ])*$`)
 
 var bigTen = big.NewInt(10)
 
@@ -111,6 +108,7 @@ type ScanResult struct {
 	Stream       []Token
 }
 
+// This code is copied from golang.org
 func isSpace(r rune) bool {
 	if r <= '\u00FF' {
 		// Obvious ASCII ones: \t through \r plus space. Plus two Latin-1 oddballs.
@@ -141,54 +139,73 @@ func isDigit(r rune) (b bool, value int) {
 	return
 }
 
-func Scan(input string) ScanResult {
-	stream := make([]Token, len(input))
-	tokenCount := 0
-	currentlyParsingInt := false
-	currentInt := new(big.Int)
-	var currentIntSourcePosition int
+type Scanner struct {
+	stream                   []Token
+	tokenCount               int
+	currentlyParsingInt      bool
+	currentInt               *big.Int
+	currentIntSourcePosition int
+}
+
+func NewScanner() *Scanner {
+	scanner := new(Scanner)
+	scanner.currentInt = new(big.Int)
+	return scanner
+}
+
+func (s *Scanner) startIntParse(position int, value *big.Int) {
+	s.currentlyParsingInt = true
+	s.currentIntSourcePosition = position
+	s.currentInt.Set(value)
+}
+
+func (s *Scanner) continueIntParse(value *big.Int) bool {
+	if s.currentlyParsingInt {
+		s.currentInt.Add(s.currentInt.Mul(s.currentInt, bigTen), value)
+		return true
+	}
+	return false
+}
+
+func (s *Scanner) endIntParse() bool {
+	if s.currentlyParsingInt {
+		s.currentlyParsingInt = false
+		s.stream[s.tokenCount] = numberToken(s.currentInt)
+		s.stream[s.tokenCount].SourcePosition = s.currentIntSourcePosition
+		s.tokenCount++
+		return true
+	}
+	return false
+}
+
+func (s *Scanner) Scan(input string) ScanResult {
+	s.stream = make([]Token, len(input))
 	// We use a range loop because it returns runes instead of bytes
 	for runePosition, nextRune := range input {
 		if isSpace(nextRune) {
-			if currentlyParsingInt {
-				currentlyParsingInt = false
-				stream[tokenCount] = numberToken(currentInt)
-				stream[tokenCount].SourcePosition = currentIntSourcePosition
-				tokenCount++
-			}
+			s.endIntParse()
 			continue
 		}
 		isDigit, digitValue := isDigit(nextRune)
 		if isDigit {
 			bigDigitValue := big.NewInt(int64(digitValue))
-			if currentlyParsingInt {
-				currentInt.Add(currentInt.Mul(currentInt, bigTen), bigDigitValue)
-			} else {
-				currentlyParsingInt = true
-				currentIntSourcePosition = runePosition
-				currentInt.Set(bigDigitValue)
+			if !s.continueIntParse(bigDigitValue) {
+				s.startIntParse(runePosition, bigDigitValue)
 			}
 
 		} else {
-			if currentlyParsingInt {
-				currentlyParsingInt = false
-				stream[tokenCount] = numberToken(currentInt)
-				stream[tokenCount].SourcePosition = currentIntSourcePosition
-				tokenCount++
+			// Handle a non-digit rune.
+			s.endIntParse()
+			s.stream[s.tokenCount] = nonNumberToken(nextRune)
+			token := &s.stream[s.tokenCount]
+			token.SourcePosition = runePosition
+			if token.Kind == TOKEN_UNKNOWN {
+				token.SourceString = string(nextRune)
 			}
-			stream[tokenCount] = nonNumberToken(nextRune)
-			stream[tokenCount].SourcePosition = runePosition
-			if stream[tokenCount].Kind == TOKEN_UNKNOWN {
-				stream[tokenCount].SourceString = string(nextRune)
-			}
-			tokenCount++
+			s.tokenCount++
 		}
 	}
-	if currentlyParsingInt {
-		stream[tokenCount] = numberToken(currentInt)
-		stream[tokenCount].SourcePosition = currentIntSourcePosition
-		tokenCount++
-	}
-	stream = stream[0:tokenCount]
-	return ScanResult{Success: true, Stream: stream}
+	s.endIntParse()
+	s.stream = s.stream[0:s.tokenCount]
+	return ScanResult{Success: true, Stream: s.stream}
 }

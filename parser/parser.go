@@ -261,6 +261,7 @@ func parseExpression(expressionNode *ParseNode, input *[]scanner.Token) (success
 }
 
 func Parse(input string) (parseResult ParseResult) {
+	scanner := scanner.NewScanner()
 	scanResult := scanner.Scan(input)
 	parseResult.Success = scanResult.Success
 	parseResult.ErrorMessage = scanResult.ErrorMessage
