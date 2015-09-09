@@ -26,23 +26,23 @@ const (
 func (tokenKind TokenKind) String() string {
 	switch tokenKind {
 	case TOKEN_LPAREN:
-		return "LPAREN"
+		return "("
 	case TOKEN_RPAREN:
-		return "RPAREN"
+		return ")"
 	case TOKEN_PLUS:
-		return "PLUS"
+		return "+"
 	case TOKEN_MINUS:
-		return "MINUS"
+		return "-"
 	case TOKEN_TIMES:
-		return "TIMES"
+		return "*"
 	case TOKEN_POWER:
-		return "POWER"
+		return "^"
 	case TOKEN_NUMBER:
 		return "NUMBER"
 	case TOKEN_UNKNOWN:
 		return "UNKNOWN"
 	default:
-		return "unexpected value"
+		panic(fmt.Sprintf("Invalid TokenKind: %v", tokenKind))
 	}
 }
 
@@ -54,6 +54,19 @@ type Token struct {
 }
 
 func (token Token) String() string {
+	switch token.Kind {
+	case TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_PLUS, TOKEN_MINUS, TOKEN_TIMES, TOKEN_POWER:
+		return token.Kind.String()
+	case TOKEN_NUMBER:
+		return fmt.Sprintf("NUMBER(%v)", token.Value.Int64())
+	case TOKEN_UNKNOWN:
+		return fmt.Sprintf("'%v'", token.SourceString)
+	default:
+		panic(fmt.Sprintf("Invalid TokenKind: %v", token.Kind))
+	}
+}
+
+func (token Token) DebugString() string {
 	s := fmt.Sprintf("{%d}", token.SourcePosition)
 	s += token.Kind.String()
 	if token.Kind == TOKEN_NUMBER {
