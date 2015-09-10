@@ -81,91 +81,123 @@ func (node *ParseNode) appendFactorChild() *ParseNode {
 	return node.appendChild("factor")
 }
 
-type ParseResult struct {
-	Error         error
-	Result        *big.Int
-	ParseTreeRoot *ParseNode
+// Type Parser
+type Parser struct {
+	input         []scanner.Token
+	err           error
+	parseTreeRoot *ParseNode
 }
 
-func parseNumber(numberNode *ParseNode, input *[]scanner.Token) (err error) {
-	if len(*input) == 0 {
-		err = fmt.Errorf("Unexpected end-of-input. Expecting a number.")
+func NewParser(scanResult scanner.ScanResult) *Parser {
+	parser := new(Parser)
+	parser.err = scanResult.Error
+	parser.input = scanResult.Stream
+	parser.parseTreeRoot = newParseNode("root expression")
+	return parser
+}
+
+func (p *Parser) peekNextToken(errMsg string) (nextToken scanner.Token) {
+	if len(p.input) == 0 {
+		p.err = fmt.Errorf(errMsg)
 		return
 	}
-	nextToken := (*input)[0]
+	nextToken = (p.input)[0]
+	return
+}
+
+// This method is similar to peekNextToken except that it returns a bool instead
+// of setting the global error state when there is no next token. This is
+// useful for case in which there being no next token is not an error.
+func (p *Parser) checkNextToken() (nextToken scanner.Token, success bool) {
+	if len(p.input) == 0 {
+		success = false
+		return
+	}
+	nextToken = (p.input)[0]
+	success = true
+	return
+}
+
+func (p *Parser) consumeNextToken() {
+	p.input = p.input[1:] // Advance the input reader by one token
+}
+
+func (p *Parser) parseNumber(numberNode *ParseNode) {
+	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting a number.")
+	if p.err != nil {
+		return
+	}
 	switch nextToken.Kind {
 	case scanner.TOKEN_NUMBER:
 		numberNode.firstToken = &nextToken
 		numberNode.value = nextToken.Value
-		*input = (*input)[1:] // Advance the input reader by one token
+		p.consumeNextToken()
 		return
 	default:
-		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting a number here.", nextToken.SourcePosition, nextToken)
+		p.err = fmt.Errorf("Unexpected token at position %d: %v. Expecting a number here.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func parseFactor(factorNode *ParseNode, input *[]scanner.Token) (err error) {
-	if len(*input) == 0 {
-		err = fmt.Errorf("Unexpected end-of-input. Expecting something to multiply.")
+func (p *Parser) parseFactor(factorNode *ParseNode) {
+	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting something to multiply.")
+	if p.err != nil {
 		return
 	}
-	nextToken := (*input)[0]
 	factorNode.firstToken = &nextToken
 	switch nextToken.Kind {
 	case scanner.TOKEN_NUMBER:
-		err = parseNumber(factorNode, input)
+		p.parseNumber(factorNode)
 		return
 	case scanner.TOKEN_MINUS:
-		*input = (*input)[1:] // Advance the input reader by one token
-		err = parseNumber(factorNode, input)
-		if err == nil {
+		p.consumeNextToken()
+		p.parseNumber(factorNode)
+		if p.err == nil {
 			factorNode.value.Neg(factorNode.value)
 		}
 		return
 	case scanner.TOKEN_LPAREN:
-		*input = (*input)[1:] // Advance the input reader by one token
+		p.consumeNextToken()
 		expressionNode := factorNode.appendExpressionChild()
-		err = parseExpression(expressionNode, input)
+		p.parseExpression(expressionNode)
 		factorNode.value = expressionNode.value
-		if err == nil {
-			if len(*input) == 0 {
-				err = fmt.Errorf("Unexpected end-of-input. Expecting a right parentheses at the end.")
+		if p.err == nil {
+			nextToken = p.peekNextToken("Unexpected end-of-input. Expecting a right parentheses at the end.")
+			if p.err != nil {
 				return
 			}
-			nextToken := (*input)[0]
 			switch nextToken.Kind {
 			case scanner.TOKEN_RPAREN:
-				*input = (*input)[1:] // Advance the input reader by one token
+				p.consumeNextToken()
 				return
 			default:
-				err = fmt.Errorf("Expecting a closing paren ')' at position %d and instead found %v", nextToken.SourcePosition, nextToken)
+				p.err = fmt.Errorf("Expecting a closing paren ')' at position %d and instead found %v", nextToken.SourcePosition, nextToken)
 			}
 		}
 	default:
 		factorNode.firstToken = nil
-		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting something to multiply: a number or '('.", nextToken.SourcePosition, nextToken)
+		p.err = fmt.Errorf("Unexpected token at position %d: %v. Expecting something to multiply: a number or '('.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func parseTermSuffix(termHead *ParseNode, node *ParseNode, input *[]scanner.Token) (err error) {
+func (p *Parser) parseTermSuffix(termHead *ParseNode, node *ParseNode) {
 	node.value = big.NewInt(1)
-	if len(*input) == 0 {
+	nextToken, success := p.checkNextToken()
+	if !success {
 		return
 	}
-	nextToken := (*input)[0]
 	switch nextToken.Kind {
 	case scanner.TOKEN_TIMES:
 		node.firstToken = &nextToken
-		*input = (*input)[1:] // Advance the input reader by one token
+		p.consumeNextToken()
 		factorNode := node.appendFactorChild()
 		termSuffixNode := node.appendTermSuffixChild()
-		err = parseFactor(factorNode, input)
-		if err == nil {
-			err = parseTermSuffix(termHead, termSuffixNode, input)
+		p.parseFactor(factorNode)
+		if p.err == nil {
+			p.parseTermSuffix(termHead, termSuffixNode)
 		}
-		if err == nil {
+		if p.err == nil {
 			node.value.Mul(factorNode.value, termSuffixNode.value)
 		}
 		return
@@ -174,55 +206,51 @@ func parseTermSuffix(termHead *ParseNode, node *ParseNode, input *[]scanner.Toke
 		// Take the epsilon transition.
 		return
 	default:
-		err = fmt.Errorf("Extraneous token at position %d: %v,"+
+		p.err = fmt.Errorf("Extraneous token at position %d: %v,"+
 			" while parsing the term that begins with %v at position %d.",
 			nextToken.SourcePosition, nextToken, termHead.firstToken, termHead.firstToken.SourcePosition)
 	}
 	return
 }
 
-func parseTerm(termNode *ParseNode, input *[]scanner.Token) (err error) {
-	termNode.value = big.NewInt(1)
-	if len(*input) == 0 {
-		err = fmt.Errorf("Unexpected end-of-input. Expecting a term.")
-		return
-	}
-	nextToken := (*input)[0]
+func (p *Parser) parseTerm(termNode *ParseNode) {
+	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting a term.")
 	switch nextToken.Kind {
 	case scanner.TOKEN_LPAREN, scanner.TOKEN_NUMBER, scanner.TOKEN_MINUS:
 		termNode.firstToken = &nextToken
 		factorNode := termNode.appendFactorChild()
 		termSuffixNode := termNode.appendTermSuffixChild()
-		err = parseFactor(factorNode, input)
-		if err == nil {
-			err = parseTermSuffix(termNode, termSuffixNode, input)
+		p.parseFactor(factorNode)
+		if p.err == nil {
+			p.parseTermSuffix(termNode, termSuffixNode)
 		}
-		if err == nil {
+		if p.err == nil {
+			termNode.value = big.NewInt(1)
 			termNode.value.Mul(factorNode.value, termSuffixNode.value)
 		}
 	default:
-		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting something to add or subtract: a number or '('.", nextToken.SourcePosition, nextToken)
+		p.err = fmt.Errorf("Unexpected token at position %d: %v. Expecting something to add or subtract: a number or '('.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]scanner.Token) (err error) {
+func (p *Parser) parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode) {
 	node.value = big.NewInt(0)
-	if len(*input) == 0 {
+	nextToken, success := p.checkNextToken()
+	if !success {
 		return
 	}
-	nextToken := (*input)[0]
 	switch nextToken.Kind {
 	case scanner.TOKEN_PLUS, scanner.TOKEN_MINUS:
 		node.firstToken = &nextToken
-		*input = (*input)[1:] // Advance the input reader by one token
+		p.consumeNextToken()
 		termNode := node.appendTermChild()
 		expressionSuffixNode := node.appendExpressionSuffixChild()
-		err = parseTerm(termNode, input)
-		if err == nil {
-			err = parseExpressionSuffix(expressionHead, expressionSuffixNode, input)
+		p.parseTerm(termNode)
+		if p.err == nil {
+			p.parseExpressionSuffix(expressionHead, expressionSuffixNode)
 		}
-		if err == nil {
+		if p.err == nil {
 			if nextToken.Kind == scanner.TOKEN_PLUS {
 				node.value.Add(expressionSuffixNode.value, termNode.value)
 			} else {
@@ -240,45 +268,55 @@ func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]
 	return
 }
 
-func parseExpression(expressionNode *ParseNode, input *[]scanner.Token) (err error) {
-	expressionNode.value = big.NewInt(0)
-	if len(*input) == 0 {
-		err = fmt.Errorf("Unexpected end-of-input. Expecting an expression.")
+func (p *Parser) parseExpression(expressionNode *ParseNode) {
+	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting an expression.")
+	if p.err != nil {
 		return
 	}
-	nextToken := (*input)[0]
 	switch nextToken.Kind {
 	case scanner.TOKEN_LPAREN, scanner.TOKEN_NUMBER, scanner.TOKEN_MINUS:
 		expressionNode.firstToken = &nextToken
 		termNode := expressionNode.appendTermChild()
 		expressionSuffixNode := expressionNode.appendExpressionSuffixChild()
-		err = parseTerm(termNode, input)
-		if err == nil {
-			err = parseExpressionSuffix(expressionNode, expressionSuffixNode, input)
+		p.parseTerm(termNode)
+		if p.err == nil {
+			p.parseExpressionSuffix(expressionNode, expressionSuffixNode)
 		}
-		if err == nil {
+		if p.err == nil {
+			expressionNode.value = new(big.Int)
 			expressionNode.value.Add(termNode.value, expressionSuffixNode.value)
 		}
 	default:
-		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting a number or '('.", nextToken.SourcePosition, nextToken)
+		p.err = fmt.Errorf("Unexpected token at position %d: %v. Expecting a number or '('.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func Parse(input string) (parseResult ParseResult) {
-	scanner := scanner.NewScanner()
-	scanResult := scanner.Scan(input)
-	parseResult.Error = scanResult.Error
-	if scanResult.Error == nil {
-		parseResult.ParseTreeRoot = newParseNode("root expression")
-		parseResult.Error = parseExpression(parseResult.ParseTreeRoot, &scanResult.Stream)
+func (p *Parser) parse() ParseResult {
+	if p.err == nil {
+		p.parseExpression(p.parseTreeRoot)
 	}
-	if parseResult.Error == nil {
-		if len(scanResult.Stream) != 0 {
-			nextToken := scanResult.Stream[0]
-			parseResult.Error = fmt.Errorf("Extraneous token at position %d: %v", nextToken.SourcePosition, nextToken)
+
+	// Check if there are any extraneous tokens left in the stream.
+	if p.err == nil {
+		nextToken, success := p.checkNextToken()
+		if success {
+			p.err = fmt.Errorf("Extraneous token at position %d: %v", nextToken.SourcePosition, nextToken)
 		}
 	}
-	parseResult.Result = parseResult.ParseTreeRoot.value
-	return
+
+	return ParseResult{p.err, p.parseTreeRoot.value, p.parseTreeRoot}
+}
+
+type ParseResult struct {
+	Error         error
+	Result        *big.Int
+	ParseTreeRoot *ParseNode
+}
+
+func Parse(input string) ParseResult {
+	scanner := scanner.NewScanner()
+	scanResult := scanner.Scan(input)
+	parser := NewParser(scanResult)
+	return parser.parse()
 }

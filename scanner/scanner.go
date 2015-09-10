@@ -102,11 +102,6 @@ func nonNumberToken(x rune) (t Token) {
 	return
 }
 
-type ScanResult struct {
-	Error  error
-	Stream []Token
-}
-
 // This code is copied from golang.org
 func isSpace(r rune) bool {
 	if r <= '\u00FF' {
@@ -175,6 +170,11 @@ func (s *Scanner) endIntParse() bool {
 		return true
 	}
 	return false
+}
+
+type ScanResult struct {
+	Error  error
+	Stream []Token
 }
 
 func (s *Scanner) Scan(input string) ScanResult {
