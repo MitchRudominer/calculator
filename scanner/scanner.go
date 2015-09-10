@@ -103,9 +103,8 @@ func nonNumberToken(x rune) (t Token) {
 }
 
 type ScanResult struct {
-	Success      bool
-	ErrorMessage string
-	Stream       []Token
+	Error  error
+	Stream []Token
 }
 
 // This code is copied from golang.org
@@ -207,5 +206,5 @@ func (s *Scanner) Scan(input string) ScanResult {
 	}
 	s.endIntParse()
 	s.stream = s.stream[0:s.tokenCount]
-	return ScanResult{Success: true, Stream: s.stream}
+	return ScanResult{Stream: s.stream}
 }

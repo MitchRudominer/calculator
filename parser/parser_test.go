@@ -34,8 +34,8 @@ func TestParseSuccess(t *testing.T) {
 	}
 	for _, c := range cases {
 		parsed := Parse(c.in)
-		if !parsed.Success {
-			t.Errorf("Parse(%q) failed with message: %q.", c.in, parsed.ErrorMessage)
+		if parsed.Error != nil {
+			t.Errorf("Parse(%q) failed with message: %v.", c.in, parsed.Error)
 			continue
 		}
 		got := fmt.Sprintf("%v", parsed.Result)
@@ -85,8 +85,8 @@ func extraneousTokenInTerm(token string, position, termStart, termStartPosition 
 		position, token, termStart, termStartPosition)
 }
 
-func matches(a, b string) bool {
-	return a == b
+func matches(err error, expected string) bool {
+	return err.Error() == expected
 }
 
 func TestParseFailure(t *testing.T) {
@@ -118,11 +118,11 @@ func TestParseFailure(t *testing.T) {
 	}
 	for _, c := range cases {
 		parsed := Parse(c.in)
-		if parsed.Success {
+		if parsed.Error == nil {
 			t.Errorf("Parse(%q) unexpectedly succeeded.", c.in)
 			continue
 		}
-		got := parsed.ErrorMessage
+		got := parsed.Error
 		if !matches(got, c.want) {
 			t.Errorf("Parse(%q) == %q, want %q", c.in, got, c.want)
 		}

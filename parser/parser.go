@@ -82,86 +82,76 @@ func (node *ParseNode) appendFactorChild() *ParseNode {
 }
 
 type ParseResult struct {
-	Success       bool
+	Error         error
 	Result        *big.Int
-	ErrorMessage  string
 	ParseTreeRoot *ParseNode
 }
 
-func parseNumber(numberNode *ParseNode, input *[]scanner.Token) (success bool, errorMessage string) {
+func parseNumber(numberNode *ParseNode, input *[]scanner.Token) (err error) {
 	if len(*input) == 0 {
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected end-of-input. Expecting a number.")
+		err = fmt.Errorf("Unexpected end-of-input. Expecting a number.")
 		return
 	}
 	nextToken := (*input)[0]
 	switch nextToken.Kind {
 	case scanner.TOKEN_NUMBER:
 		numberNode.firstToken = &nextToken
-		success = true
 		numberNode.value = nextToken.Value
 		*input = (*input)[1:] // Advance the input reader by one token
 		return
 	default:
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected token at position %d: %v. Expecting a number here.", nextToken.SourcePosition, nextToken)
+		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting a number here.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func parseFactor(factorNode *ParseNode, input *[]scanner.Token) (success bool, errorMessage string) {
+func parseFactor(factorNode *ParseNode, input *[]scanner.Token) (err error) {
 	if len(*input) == 0 {
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected end-of-input. Expecting something to multiply.")
+		err = fmt.Errorf("Unexpected end-of-input. Expecting something to multiply.")
 		return
 	}
 	nextToken := (*input)[0]
 	factorNode.firstToken = &nextToken
 	switch nextToken.Kind {
 	case scanner.TOKEN_NUMBER:
-		success, errorMessage = parseNumber(factorNode, input)
+		err = parseNumber(factorNode, input)
 		return
 	case scanner.TOKEN_MINUS:
 		*input = (*input)[1:] // Advance the input reader by one token
-		success, errorMessage = parseNumber(factorNode, input)
-		if success {
+		err = parseNumber(factorNode, input)
+		if err == nil {
 			factorNode.value.Neg(factorNode.value)
 		}
 		return
 	case scanner.TOKEN_LPAREN:
 		*input = (*input)[1:] // Advance the input reader by one token
 		expressionNode := factorNode.appendExpressionChild()
-		success, errorMessage = parseExpression(expressionNode, input)
+		err = parseExpression(expressionNode, input)
 		factorNode.value = expressionNode.value
-		if success {
+		if err == nil {
 			if len(*input) == 0 {
-				success = false
-				errorMessage = fmt.Sprintf("Unexpected end-of-input. Expecting a right parentheses at the end.")
+				err = fmt.Errorf("Unexpected end-of-input. Expecting a right parentheses at the end.")
 				return
 			}
 			nextToken := (*input)[0]
 			switch nextToken.Kind {
 			case scanner.TOKEN_RPAREN:
-				success = true
 				*input = (*input)[1:] // Advance the input reader by one token
 				return
 			default:
-				success = false
-				errorMessage = fmt.Sprintf("Expecting a closing paren ')' at position %d and instead found %v", nextToken.SourcePosition, nextToken)
+				err = fmt.Errorf("Expecting a closing paren ')' at position %d and instead found %v", nextToken.SourcePosition, nextToken)
 			}
 		}
 	default:
-		success = false
 		factorNode.firstToken = nil
-		errorMessage = fmt.Sprintf("Unexpected token at position %d: %v. Expecting something to multiply: a number or '('.", nextToken.SourcePosition, nextToken)
+		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting something to multiply: a number or '('.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func parseTermSuffix(termHead *ParseNode, node *ParseNode, input *[]scanner.Token) (success bool, errorMessage string) {
+func parseTermSuffix(termHead *ParseNode, node *ParseNode, input *[]scanner.Token) (err error) {
 	node.value = big.NewInt(1)
 	if len(*input) == 0 {
-		success = true
 		return
 	}
 	nextToken := (*input)[0]
@@ -171,33 +161,30 @@ func parseTermSuffix(termHead *ParseNode, node *ParseNode, input *[]scanner.Toke
 		*input = (*input)[1:] // Advance the input reader by one token
 		factorNode := node.appendFactorChild()
 		termSuffixNode := node.appendTermSuffixChild()
-		success, errorMessage = parseFactor(factorNode, input)
-		if success {
-			success, errorMessage = parseTermSuffix(termHead, termSuffixNode, input)
+		err = parseFactor(factorNode, input)
+		if err == nil {
+			err = parseTermSuffix(termHead, termSuffixNode, input)
 		}
-		if success {
+		if err == nil {
 			node.value.Mul(factorNode.value, termSuffixNode.value)
 		}
 		return
 	// FOLLOW(TERMSUFFIX) = {-, +, )}
 	case scanner.TOKEN_MINUS, scanner.TOKEN_PLUS, scanner.TOKEN_RPAREN:
-		success = true
 		// Take the epsilon transition.
 		return
 	default:
-		success = false
-		errorMessage = fmt.Sprintf("Extraneous token at position %d: %v,"+
+		err = fmt.Errorf("Extraneous token at position %d: %v,"+
 			" while parsing the term that begins with %v at position %d.",
 			nextToken.SourcePosition, nextToken, termHead.firstToken, termHead.firstToken.SourcePosition)
 	}
 	return
 }
 
-func parseTerm(termNode *ParseNode, input *[]scanner.Token) (success bool, errorMessage string) {
+func parseTerm(termNode *ParseNode, input *[]scanner.Token) (err error) {
 	termNode.value = big.NewInt(1)
 	if len(*input) == 0 {
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected end-of-input. Expecting a term.")
+		err = fmt.Errorf("Unexpected end-of-input. Expecting a term.")
 		return
 	}
 	nextToken := (*input)[0]
@@ -206,24 +193,22 @@ func parseTerm(termNode *ParseNode, input *[]scanner.Token) (success bool, error
 		termNode.firstToken = &nextToken
 		factorNode := termNode.appendFactorChild()
 		termSuffixNode := termNode.appendTermSuffixChild()
-		success, errorMessage = parseFactor(factorNode, input)
-		if success {
-			success, errorMessage = parseTermSuffix(termNode, termSuffixNode, input)
+		err = parseFactor(factorNode, input)
+		if err == nil {
+			err = parseTermSuffix(termNode, termSuffixNode, input)
 		}
-		if success {
+		if err == nil {
 			termNode.value.Mul(factorNode.value, termSuffixNode.value)
 		}
 	default:
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected token at position %d: %v. Expecting something to add or subtract: a number or '('.", nextToken.SourcePosition, nextToken)
+		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting something to add or subtract: a number or '('.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
 
-func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]scanner.Token) (success bool, errorMessage string) {
+func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]scanner.Token) (err error) {
 	node.value = big.NewInt(0)
 	if len(*input) == 0 {
-		success = true
 		return
 	}
 	nextToken := (*input)[0]
@@ -233,11 +218,11 @@ func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]
 		*input = (*input)[1:] // Advance the input reader by one token
 		termNode := node.appendTermChild()
 		expressionSuffixNode := node.appendExpressionSuffixChild()
-		success, errorMessage = parseTerm(termNode, input)
-		if success {
-			success, errorMessage = parseExpressionSuffix(expressionHead, expressionSuffixNode, input)
+		err = parseTerm(termNode, input)
+		if err == nil {
+			err = parseExpressionSuffix(expressionHead, expressionSuffixNode, input)
 		}
-		if success {
+		if err == nil {
 			if nextToken.Kind == scanner.TOKEN_PLUS {
 				node.value.Add(expressionSuffixNode.value, termNode.value)
 			} else {
@@ -247,7 +232,6 @@ func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]
 
 	// FOLLOW(EXPRSUFFIX) = {*, )}
 	case scanner.TOKEN_TIMES, scanner.TOKEN_RPAREN:
-		success = true
 		// Take the epsilon transition
 		return
 	default:
@@ -256,11 +240,10 @@ func parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode, input *[]
 	return
 }
 
-func parseExpression(expressionNode *ParseNode, input *[]scanner.Token) (success bool, errorMessage string) {
+func parseExpression(expressionNode *ParseNode, input *[]scanner.Token) (err error) {
 	expressionNode.value = big.NewInt(0)
 	if len(*input) == 0 {
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected end-of-input. Expecting an expression.")
+		err = fmt.Errorf("Unexpected end-of-input. Expecting an expression.")
 		return
 	}
 	nextToken := (*input)[0]
@@ -269,16 +252,15 @@ func parseExpression(expressionNode *ParseNode, input *[]scanner.Token) (success
 		expressionNode.firstToken = &nextToken
 		termNode := expressionNode.appendTermChild()
 		expressionSuffixNode := expressionNode.appendExpressionSuffixChild()
-		success, errorMessage = parseTerm(termNode, input)
-		if success {
-			success, errorMessage = parseExpressionSuffix(expressionNode, expressionSuffixNode, input)
+		err = parseTerm(termNode, input)
+		if err == nil {
+			err = parseExpressionSuffix(expressionNode, expressionSuffixNode, input)
 		}
-		if success {
+		if err == nil {
 			expressionNode.value.Add(termNode.value, expressionSuffixNode.value)
 		}
 	default:
-		success = false
-		errorMessage = fmt.Sprintf("Unexpected token at position %d: %v. Expecting a number or '('.", nextToken.SourcePosition, nextToken)
+		err = fmt.Errorf("Unexpected token at position %d: %v. Expecting a number or '('.", nextToken.SourcePosition, nextToken)
 	}
 	return
 }
@@ -286,17 +268,15 @@ func parseExpression(expressionNode *ParseNode, input *[]scanner.Token) (success
 func Parse(input string) (parseResult ParseResult) {
 	scanner := scanner.NewScanner()
 	scanResult := scanner.Scan(input)
-	parseResult.Success = scanResult.Success
-	parseResult.ErrorMessage = scanResult.ErrorMessage
-	if scanResult.Success {
+	parseResult.Error = scanResult.Error
+	if scanResult.Error == nil {
 		parseResult.ParseTreeRoot = newParseNode("root expression")
-		parseResult.Success, parseResult.ErrorMessage = parseExpression(parseResult.ParseTreeRoot, &scanResult.Stream)
+		parseResult.Error = parseExpression(parseResult.ParseTreeRoot, &scanResult.Stream)
 	}
-	if parseResult.Success {
+	if parseResult.Error == nil {
 		if len(scanResult.Stream) != 0 {
-			parseResult.Success = false
 			nextToken := scanResult.Stream[0]
-			parseResult.ErrorMessage = fmt.Sprintf("Extraneous token at position %d: %v", nextToken.SourcePosition, nextToken)
+			parseResult.Error = fmt.Errorf("Extraneous token at position %d: %v", nextToken.SourcePosition, nextToken)
 		}
 	}
 	parseResult.Result = parseResult.ParseTreeRoot.value

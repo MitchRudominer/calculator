@@ -18,11 +18,11 @@ func main() {
 
 		parsed := parser.Parse(line)
 
-		if parsed.Success {
+		if parsed.Error == nil {
 			fmt.Println(parsed.Result)
 			fmt.Println(parsed.ParseTreeRoot)
 		} else {
-			fmt.Println(parsed.ErrorMessage)
+			fmt.Println(parsed.Error)
 			fmt.Println(parsed.ParseTreeRoot)
 		}
 	}
