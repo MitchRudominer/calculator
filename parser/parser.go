@@ -75,18 +75,19 @@ func NewParser(scanResult scanner.ScanResult) *Parser {
 	return parser
 }
 
+// This method is similar to checkNextToken except that it sets the global
+// error state when there is no next token.
 func (p *Parser) peekNextToken(errMsg string) (nextToken scanner.Token) {
-	if len(p.input) == 0 {
+	nextToken, success := p.checkNextToken()
+	if !success {
 		p.err = fmt.Errorf(errMsg)
-		return
 	}
-	nextToken = (p.input)[0]
 	return
 }
 
 // This method is similar to peekNextToken except that it returns a bool instead
 // of setting the global error state when there is no next token. This is
-// useful for case in which there being no next token is not an error.
+// useful for cases in which there being no next token is not an error.
 func (p *Parser) checkNextToken() (nextToken scanner.Token, success bool) {
 	if len(p.input) == 0 {
 		success = false
