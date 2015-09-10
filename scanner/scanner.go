@@ -57,7 +57,7 @@ func (token Token) String() string {
 	case TOKEN_NUMBER:
 		return fmt.Sprintf("NUMBER(%v)", token.Value.Int64())
 	case TOKEN_UNKNOWN:
-		return fmt.Sprintf("'%v'", token.SourceString)
+		return fmt.Sprintf("%v", token.SourceString)
 	default:
 		panic(fmt.Sprintf("Invalid TokenKind: %v", token.Kind))
 	}

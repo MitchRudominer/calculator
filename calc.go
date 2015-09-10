@@ -23,6 +23,7 @@ func main() {
 			fmt.Println(parsed.ParseTreeRoot)
 		} else {
 			fmt.Println(parsed.ErrorMessage)
+			fmt.Println(parsed.ParseTreeRoot)
 		}
 	}
 }

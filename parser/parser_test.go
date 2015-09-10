@@ -48,15 +48,45 @@ func TestParseSuccess(t *testing.T) {
 const (
 	EXPECTING_EXPRESSION_AT_END = "Unexpected end-of-input. Expecting an expression."
 	EXPECTING_RPAREN_AT_END     = "Unexpected end-of-input. Expecting a right parentheses at the end."
-	EXPECTING_FACTOR_AT_END     = "Unexpected end-of-input. Expecting a factor."
+	EXPECTING_FACTOR_AT_END     = "Unexpected end-of-input. Expecting something to multiply."
 )
 
-func unexpectedToken(token string, position int) string {
-	return fmt.Sprintf("Unexpected token at postion %d: %s", position, token)
+func expectingNumber(token string, position int) string {
+	return fmt.Sprintf("Unexpected token at position %d: %s. Expecting a number here.", position, token)
 }
 
-func unrecognizedToken(token string, position int) string {
-	return fmt.Sprintf("Unexpected token at postion %d: '%s'", position, token)
+func expectingFactor(token string, position int) string {
+	return fmt.Sprintf("Unexpected token at position %d: %s. Expecting something to multiply: a number or '('.", position, token)
+}
+
+func expectingExpression(token string, position int) string {
+	return fmt.Sprintf("Unexpected token at position %d: %s. Expecting a number or '('.", position, token)
+}
+
+func expectingTerm(token string, position int) string {
+	return fmt.Sprintf("Unexpected token at position %d: %s. Expecting something to add or subtract: a number or '('.", position, token)
+}
+
+func expectingEndOfExpression(token string, position int) string {
+	return fmt.Sprintf("Unexpected token at position %d: %s. Expecting a number or ')'.", position, token)
+}
+
+func unexpectedToken(token string, position int) string {
+	return fmt.Sprintf("Unexpected token at position %d: %s", position, token)
+}
+
+func extraneousToken(token string, position int) string {
+	return fmt.Sprintf("Extraneous token at position %d: %s", position, token)
+}
+
+func extraneousTokenInTerm(token string, position, termStart, termStartPosition int) string {
+	return fmt.Sprintf("Extraneous token at position %d: %v,"+
+		" while parsing the term that begins with NUMBER(%d) at position %d.",
+		position, token, termStart, termStartPosition)
+}
+
+func matches(a, b string) bool {
+	return a == b
 }
 
 func TestParseFailure(t *testing.T) {
@@ -65,19 +95,26 @@ func TestParseFailure(t *testing.T) {
 	}{
 		{"", EXPECTING_EXPRESSION_AT_END},
 		{"     ", EXPECTING_EXPRESSION_AT_END},
-		{"a", unrecognizedToken("a", 0)},
-		{"     a", unrecognizedToken("a", 5)},
-		{"+", unexpectedToken("+", 0)},
-		{"     +", unexpectedToken("+", 5)},
+		{"a", expectingExpression("a", 0)},
+		{"     a", expectingExpression("a", 5)},
+		{"+", expectingExpression("+", 0)},
+		{"     +", expectingExpression("+", 5)},
 		{"(", EXPECTING_EXPRESSION_AT_END},
-		{")", unexpectedToken(")", 0)},
-		{"()", unexpectedToken(")", 1)},
+		{")", expectingExpression(")", 0)},
+		{"()", expectingExpression(")", 1)},
+		{"(67) + &", expectingTerm("&", 7)},
 		{"((1)", EXPECTING_RPAREN_AT_END},
-		{"((1)))", unexpectedToken(")", 5)},
-		{"1---1", unexpectedToken("-", 3)},
+		{"((1)))", extraneousToken(")", 5)},
+		{"1---1", expectingNumber("-", 3)},
+		{"5 + 3 * 2 a + 7", extraneousTokenInTerm("a", 10, 3, 4)},
+		{"7 * (1 + 2 a)", extraneousTokenInTerm("a", 11, 2, 9)},
+		{"2 *", EXPECTING_FACTOR_AT_END},
 		{"111 * -5 *", EXPECTING_FACTOR_AT_END},
-		{"111 * *5", unexpectedToken("*", 6)},
-		{"(666 + -4) * -11 + 17 + -3) * 5", unexpectedToken(")", 26)},
+		{"111 * -5 * +", expectingFactor("+", 11)},
+		{"111 * -5 * )", expectingFactor(")", 11)},
+		{"111 * *5", expectingFactor("*", 6)},
+		{"(666 + -4) * -11 + 17 + -3) * 5", extraneousToken(")", 26)},
+		{"(666 + -4) * -11 + 17 + -3 * )", expectingFactor(")", 29)},
 	}
 	for _, c := range cases {
 		parsed := Parse(c.in)
@@ -86,7 +123,7 @@ func TestParseFailure(t *testing.T) {
 			continue
 		}
 		got := parsed.ErrorMessage
-		if got != c.want {
+		if !matches(got, c.want) {
 			t.Errorf("Parse(%q) == %q, want %q", c.in, got, c.want)
 		}
 	}
