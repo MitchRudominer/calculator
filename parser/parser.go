@@ -61,26 +61,6 @@ func (node *ParseNode) appendChild(name string) *ParseNode {
 	return child
 }
 
-func (node *ParseNode) appendExpressionChild() *ParseNode {
-	return node.appendChild("expression")
-}
-
-func (node *ParseNode) appendExpressionSuffixChild() *ParseNode {
-	return node.appendChild("expressionSuffix")
-}
-
-func (node *ParseNode) appendTermChild() *ParseNode {
-	return node.appendChild("term")
-}
-
-func (node *ParseNode) appendTermSuffixChild() *ParseNode {
-	return node.appendChild("termSuffix")
-}
-
-func (node *ParseNode) appendFactorChild() *ParseNode {
-	return node.appendChild("factor")
-}
-
 // Type Parser
 type Parser struct {
 	input         []scanner.Token
@@ -92,7 +72,6 @@ func NewParser(scanResult scanner.ScanResult) *Parser {
 	parser := new(Parser)
 	parser.err = scanResult.Error
 	parser.input = scanResult.Stream
-	parser.parseTreeRoot = newParseNode("root expression")
 	return parser
 }
 
@@ -122,7 +101,8 @@ func (p *Parser) consumeNextToken() {
 	p.input = p.input[1:] // Advance the input reader by one token
 }
 
-func (p *Parser) parseNumber(numberNode *ParseNode) {
+func (p *Parser) parseNumber(parentNode *ParseNode) (numberNode *ParseNode) {
+	numberNode = parentNode.appendChild("number")
 	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting a number.")
 	if p.err != nil {
 		return
@@ -139,7 +119,8 @@ func (p *Parser) parseNumber(numberNode *ParseNode) {
 	return
 }
 
-func (p *Parser) parseFactor(factorNode *ParseNode) {
+func (p *Parser) parseFactor(parentNode *ParseNode) (factorNode *ParseNode) {
+	factorNode = parentNode.appendChild("factor")
 	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting something to multiply.")
 	if p.err != nil {
 		return
@@ -147,19 +128,20 @@ func (p *Parser) parseFactor(factorNode *ParseNode) {
 	factorNode.firstToken = &nextToken
 	switch nextToken.Kind {
 	case scanner.TOKEN_NUMBER:
-		p.parseNumber(factorNode)
+		numberNode := p.parseNumber(factorNode)
+		factorNode.value = numberNode.value
 		return
 	case scanner.TOKEN_MINUS:
 		p.consumeNextToken()
-		p.parseNumber(factorNode)
+		numberNode := p.parseNumber(factorNode)
+		factorNode.value = numberNode.value
 		if p.err == nil {
 			factorNode.value.Neg(factorNode.value)
 		}
 		return
 	case scanner.TOKEN_LPAREN:
 		p.consumeNextToken()
-		expressionNode := factorNode.appendExpressionChild()
-		p.parseExpression(expressionNode)
+		expressionNode := p.parseExpression(factorNode)
 		factorNode.value = expressionNode.value
 		if p.err == nil {
 			nextToken = p.peekNextToken("Unexpected end-of-input. Expecting a right parentheses at the end.")
@@ -181,26 +163,28 @@ func (p *Parser) parseFactor(factorNode *ParseNode) {
 	return
 }
 
-func (p *Parser) parseTermSuffix(termHead *ParseNode, node *ParseNode) {
-	node.value = big.NewInt(1)
+func (p *Parser) parseTermSuffix(termHead *ParseNode, parentNode *ParseNode) (termSuffixNode *ParseNode) {
+	termSuffixNode = parentNode.appendChild("termSuffix")
+	termSuffixNode.value = big.NewInt(1)
 	nextToken, success := p.checkNextToken()
 	if !success {
 		return
 	}
 	switch nextToken.Kind {
 	case scanner.TOKEN_TIMES:
-		node.firstToken = &nextToken
+		termSuffixNode.firstToken = &nextToken
 		p.consumeNextToken()
-		factorNode := node.appendFactorChild()
-		termSuffixNode := node.appendTermSuffixChild()
-		p.parseFactor(factorNode)
+		factorNode := p.parseFactor(termSuffixNode)
+		var childTermSuffixNode *ParseNode
+
 		if p.err == nil {
-			p.parseTermSuffix(termHead, termSuffixNode)
+			childTermSuffixNode = p.parseTermSuffix(termHead, termSuffixNode)
 		}
 		if p.err == nil {
-			node.value.Mul(factorNode.value, termSuffixNode.value)
+			termSuffixNode.value.Mul(factorNode.value, childTermSuffixNode.value)
 		}
 		return
+
 	// FOLLOW(TERMSUFFIX) = {-, +, )}
 	case scanner.TOKEN_MINUS, scanner.TOKEN_PLUS, scanner.TOKEN_RPAREN:
 		// Take the epsilon transition.
@@ -213,16 +197,18 @@ func (p *Parser) parseTermSuffix(termHead *ParseNode, node *ParseNode) {
 	return
 }
 
-func (p *Parser) parseTerm(termNode *ParseNode) {
+func (p *Parser) parseTerm(parentNode *ParseNode) (termNode *ParseNode) {
+	termNode = parentNode.appendChild("term")
 	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting a term.")
 	switch nextToken.Kind {
 	case scanner.TOKEN_LPAREN, scanner.TOKEN_NUMBER, scanner.TOKEN_MINUS:
 		termNode.firstToken = &nextToken
-		factorNode := termNode.appendFactorChild()
-		termSuffixNode := termNode.appendTermSuffixChild()
-		p.parseFactor(factorNode)
+
+		factorNode := p.parseFactor(termNode)
+		var termSuffixNode *ParseNode
+
 		if p.err == nil {
-			p.parseTermSuffix(termNode, termSuffixNode)
+			termSuffixNode = p.parseTermSuffix(termNode, termNode)
 		}
 		if p.err == nil {
 			termNode.value = big.NewInt(1)
@@ -234,27 +220,28 @@ func (p *Parser) parseTerm(termNode *ParseNode) {
 	return
 }
 
-func (p *Parser) parseExpressionSuffix(expressionHead *ParseNode, node *ParseNode) {
-	node.value = big.NewInt(0)
+func (p *Parser) parseExpressionSuffix(expressionHead *ParseNode, parentNode *ParseNode) (expressionSuffixNode *ParseNode) {
+	expressionSuffixNode = parentNode.appendChild("expressionSuffix")
+	expressionSuffixNode.value = big.NewInt(0)
 	nextToken, success := p.checkNextToken()
 	if !success {
 		return
 	}
 	switch nextToken.Kind {
 	case scanner.TOKEN_PLUS, scanner.TOKEN_MINUS:
-		node.firstToken = &nextToken
+		expressionSuffixNode.firstToken = &nextToken
 		p.consumeNextToken()
-		termNode := node.appendTermChild()
-		expressionSuffixNode := node.appendExpressionSuffixChild()
-		p.parseTerm(termNode)
+		termNode := p.parseTerm(expressionSuffixNode)
+		var childExpressionSuffixNode *ParseNode
+
 		if p.err == nil {
-			p.parseExpressionSuffix(expressionHead, expressionSuffixNode)
+			childExpressionSuffixNode = p.parseExpressionSuffix(expressionHead, expressionSuffixNode)
 		}
 		if p.err == nil {
 			if nextToken.Kind == scanner.TOKEN_PLUS {
-				node.value.Add(expressionSuffixNode.value, termNode.value)
+				expressionSuffixNode.value.Add(childExpressionSuffixNode.value, termNode.value)
 			} else {
-				node.value.Sub(expressionSuffixNode.value, termNode.value)
+				expressionSuffixNode.value.Sub(childExpressionSuffixNode.value, termNode.value)
 			}
 		}
 
@@ -268,7 +255,12 @@ func (p *Parser) parseExpressionSuffix(expressionHead *ParseNode, node *ParseNod
 	return
 }
 
-func (p *Parser) parseExpression(expressionNode *ParseNode) {
+func (p *Parser) parseExpression(parentNode *ParseNode) (expressionNode *ParseNode) {
+	if parentNode != nil {
+		expressionNode = parentNode.appendChild("expression")
+	} else {
+		expressionNode = newParseNode("root node")
+	}
 	nextToken := p.peekNextToken("Unexpected end-of-input. Expecting an expression.")
 	if p.err != nil {
 		return
@@ -276,11 +268,11 @@ func (p *Parser) parseExpression(expressionNode *ParseNode) {
 	switch nextToken.Kind {
 	case scanner.TOKEN_LPAREN, scanner.TOKEN_NUMBER, scanner.TOKEN_MINUS:
 		expressionNode.firstToken = &nextToken
-		termNode := expressionNode.appendTermChild()
-		expressionSuffixNode := expressionNode.appendExpressionSuffixChild()
-		p.parseTerm(termNode)
+		termNode := p.parseTerm(expressionNode)
+		var expressionSuffixNode *ParseNode
+
 		if p.err == nil {
-			p.parseExpressionSuffix(expressionNode, expressionSuffixNode)
+			expressionSuffixNode = p.parseExpressionSuffix(expressionNode, expressionNode)
 		}
 		if p.err == nil {
 			expressionNode.value = new(big.Int)
@@ -294,7 +286,7 @@ func (p *Parser) parseExpression(expressionNode *ParseNode) {
 
 func (p *Parser) parse() ParseResult {
 	if p.err == nil {
-		p.parseExpression(p.parseTreeRoot)
+		p.parseTreeRoot = p.parseExpression(nil)
 	}
 
 	// Check if there are any extraneous tokens left in the stream.
